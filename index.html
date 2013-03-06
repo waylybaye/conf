@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" type="text/css" href="static/bootstrap/css/bootstrap.min.css"/>
+  <link rel="stylesheet" type="text/css" href="static/bootstrap/css/bootstrap-responsive.min.css"/>
+  <link rel="stylesheet" type="text/css" href="static/css/style.css"/>
+  <title>Conf</title>
+</head>
+<body>
+  <div class="container">
+    <h1>conf</h1>
+
+    <form class='form-inline' id='conf-form'>
+      <label>
+        Project Root
+      </label>
+      <input type='text' name='project_root' placeholder="/home/user/www/django-demo"/>
+
+      <label>Host</label>
+      <input type='text' name='host' placeholder='example.com'/>
+
+      <input type='checkbox' name='enable_nginx' />
+      <input type='checkbox' name='enable_gunicorn' />
+      <input type='checkbox' name='enable_supervisor' />
+
+      <button class='btn' id='generate-conf'>Get</button>
+
+      <div class="group" id='nginx-conf-group'>
+        <input type='hidden' name='workers' value='1' />
+      </div>
+    </form>
+
+    <div id="result" class='row'>
+    </div>
+  </div>
+
+  <script type="text/javascript" src="static/js/handlebars.js"></script>
+  <script type="text/javascript" src="http://ajax.aspnetcdn.com/ajax/jQuery/jquery-1.9.1.min.js"></script>
+  <script type="text/javascript" src="static/js/prettify.js"></script>
+  <script id='nginx-template' type="text/template">
+upstream app_server {
+    server {{ wsgi_socks }} fail_timeout=0;
+}
+
+server {
+    listen 80 default;
+    client_max_body_size 4G;
+    server_name {{ server_name }};
+
+    keepalive_timeout 5;
+
+    # path for static files
+    # root /path/to/app/current/public;
+
+    location / {
+        # checks for static file, if not found proxy to app
+        try_files $uri @proxy_to_app;
+    }
+
+    location @proxy_to_app {
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host $http_host;
+        proxy_redirect off;
+
+        proxy_pass   http://app_server;
+    }
+
+    error_page 500 502 503 504 /500.html;
+    location = /500.html {
+        root /path/to/app/current/public;
+    }
+}
+  </script>
+
+  <script id="supervisor-template" type="text/template">
+[program:{{ host }}]
+command=gunicorn wsgi:application -b {{ wsgi_socks }}
+user=nobody
+autostart=true
+autorestart=true
+redirect_stderr=true
+  </script>
+
+  <script type="text/javascript">
+
+  $('#conf-form input').each(function(){
+    if( !this.value ){
+      this.value = this.placeholder;
+    }
+  }).on('click', function(){
+    if( this.value === this.placeholder ){
+      this.select();
+    }
+  });
+
+  function render(template, context){
+    var source = $('#' + template).html();
+    var template = Handlebars.compile(source);
+    var result = template(context);
+    return result;
+  }
+
+  $('#generate-conf').click(function(event){
+    event.preventDefault();
+    var context = {};
+    $('#conf-form :input').each(function(){
+      if( this.name ){
+        context[this.name] = this.value;
+      }
+    });
+
+    var project_root = context['project_root'];
+    var wsgi_socks = "unix:" + project_root + '/wsgi.sock';
+    context['wsgi_socks'] = wsgi_socks;
+
+    var nginx = render('nginx-template', context);
+    var supervisord = render('supervisor-template', context);
+    $('#result').html('').append("<div class='span6'><pre>" + nginx + "</pre></div>")
+      .append("<div class='span6'><pre>" + supervisord + "</pre></div>");
+    $('#result pre').addClass('prettyprint');
+    prettyPrint();
+  });
+  </script>
+</body>
+</html>
